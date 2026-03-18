@@ -13,7 +13,7 @@ from vllm.entrypoints.openai.chat_completion.serving import OpenAIServingChat
 from vllm.entrypoints.openai.completion.protocol import CompletionRequest
 from vllm.entrypoints.openai.completion.serving import OpenAIServingCompletion
 from vllm.entrypoints.openai.engine.protocol import ErrorResponse
-from vllm.entrypoints.pooling.embed.serving import ServingEmbedding
+from vllm.entrypoints.pooling.embed.serving import OpenAIServingEmbedding
 from vllm.entrypoints.pooling.embed.protocol import EmbeddingChatRequest, EmbeddingCompletionRequest
 from vllm.entrypoints.openai.models.protocol import BaseModelPath, LoRAModulePath
 from vllm.entrypoints.openai.models.serving import OpenAIServingModels
@@ -286,14 +286,13 @@ class OpenAIvLLMEngine(vLLMEngine):
             enable_force_include_usage=os.getenv('ENABLE_FORCE_INCLUDE_USAGE', 'false').lower() == 'true',
             log_error_stack=os.getenv('LOG_ERROR_STACK', 'false').lower() == 'true',
         )
-        self.embedding_engine = ServingEmbedding(
+        self.embedding_engine = OpenAIServingEmbedding(
             engine_client=self.llm,
             models=self.serving_models,
             request_logger=None,
             chat_template=chat_template,
             chat_template_content_format="auto",
             trust_request_chat_template=os.getenv('TRUST_REQUEST_CHAT_TEMPLATE', 'false').lower() == 'true',
-            return_tokens_as_token_ids=os.getenv('RETURN_TOKENS_AS_TOKEN_IDS', 'false').lower() == 'true',
             log_error_stack=os.getenv('LOG_ERROR_STACK', 'false').lower() == 'true',
         )
 
