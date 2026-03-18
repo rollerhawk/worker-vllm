@@ -248,6 +248,14 @@ class OpenAIvLLMEngine(vLLMEngine):
         if self.tokenizer and hasattr(self.tokenizer, 'tokenizer'):
             chat_template = self.tokenizer.tokenizer.chat_template
         
+        default_chat_template_kwargs = None
+        _chat_template_kwargs_env = os.getenv('DEFAULT_CHAT_TEMPLATE_KWARGS')
+        if _chat_template_kwargs_env:
+            try:
+                default_chat_template_kwargs = json.loads(_chat_template_kwargs_env)
+            except json.JSONDecodeError as e:
+                logging.warning(f"Failed to parse DEFAULT_CHAT_TEMPLATE_KWARGS: {e}")
+
         self.chat_engine = OpenAIServingChat(
             engine_client=self.llm, 
             models=self.serving_models,
@@ -255,6 +263,7 @@ class OpenAIvLLMEngine(vLLMEngine):
             request_logger=None,
             chat_template=chat_template,
             chat_template_content_format="auto",
+            default_chat_template_kwargs=default_chat_template_kwargs,
             trust_request_chat_template=os.getenv('TRUST_REQUEST_CHAT_TEMPLATE', 'false').lower() == 'true',
             return_tokens_as_token_ids=os.getenv('RETURN_TOKENS_AS_TOKEN_IDS', 'false').lower() == 'true',
             reasoning_parser=os.getenv('REASONING_PARSER', "") or "",
