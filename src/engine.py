@@ -286,15 +286,18 @@ class OpenAIvLLMEngine(vLLMEngine):
             enable_force_include_usage=os.getenv('ENABLE_FORCE_INCLUDE_USAGE', 'false').lower() == 'true',
             log_error_stack=os.getenv('LOG_ERROR_STACK', 'false').lower() == 'true',
         )
-        self.embedding_engine = OpenAIServingEmbedding(
-            engine_client=self.llm,
-            models=self.serving_models,
-            request_logger=None,
-            chat_template=chat_template,
-            chat_template_content_format="auto",
-            trust_request_chat_template=os.getenv('TRUST_REQUEST_CHAT_TEMPLATE', 'false').lower() == 'true',
-            log_error_stack=os.getenv('LOG_ERROR_STACK', 'false').lower() == 'true',
-        )
+        if self.model_config.pooler_config is not None:
+            self.embedding_engine = OpenAIServingEmbedding(
+                engine_client=self.llm,
+                models=self.serving_models,
+                request_logger=None,
+                chat_template=chat_template,
+                chat_template_content_format="auto",
+                trust_request_chat_template=os.getenv('TRUST_REQUEST_CHAT_TEMPLATE', 'false').lower() == 'true',
+                log_error_stack=os.getenv('LOG_ERROR_STACK', 'false').lower() == 'true',
+            )
+        else:
+            self.embedding_engine = None
 
         if hasattr(self.chat_engine, 'warmup'):
             await self.chat_engine.warmup()
@@ -318,6 +321,8 @@ class OpenAIvLLMEngine(vLLMEngine):
         return models.model_dump()
     
     async def _handle_embedding_request(self, openai_request: JobInput):
+        if self.embedding_engine is None:
+            return create_error_response("This model does not support embeddings").model_dump()
         try:
             openai_input = openai_request.openai_input
             # Determine request class: if "messages" key is present, it's a chat-style embedding
