@@ -22,18 +22,21 @@ RUN which nvcc && nvcc --version
 RUN python3 -m pip install --upgrade pip setuptools wheel
 
 # Install the exact CUDA 13.0 vLLM wheel
-# Verified wheel URL format from vLLM docs; this specific 0.17.1 cu130 wheel resolves.
 ARG VLLM_VERSION=0.17.1
-RUN python3 -m pip install --no-cache-dir \
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    python3 -m pip install --no-cache-dir \
     "https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cu130-cp38-abi3-manylinux_2_35_x86_64.whl" \
     --extra-index-url https://download.pytorch.org/whl/cu130
 
-# Install FlashInfer + optional prebuilt packages to reduce runtime compilation
+# Remove any conflicting FlashInfer packages first
+RUN python3 -m pip uninstall -y flashinfer flashinfer-python flashinfer-cubin flashinfer-jit-cache || true
+
+# Install ONE matched FlashInfer set
 RUN python3 -m pip install --no-cache-dir \
-    flashinfer-python \
-    flashinfer-cubin && \
+    flashinfer-python==0.6.4 \
+    flashinfer-cubin==0.6.4 && \
     python3 -m pip install --no-cache-dir \
-    flashinfer-jit-cache \
+    flashinfer-jit-cache==0.6.4 \
     --index-url https://flashinfer.ai/whl/cu130
 
 # Install your additional Python dependencies afterwards
