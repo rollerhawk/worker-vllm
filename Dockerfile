@@ -1,29 +1,52 @@
-FROM nvidia/cuda:12.9.1-base-ubuntu22.04 
+FROM nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04
 
-RUN apt-get update -y \
-    && apt-get install -y python3-pip
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        python3-pip \
+        python3-dev \
+        build-essential \
+        ninja-build \
+        git \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN ldconfig /usr/local/cuda-12.9/compat/
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
 
-# Install vLLM with FlashInfer - use CUDA 12.8 PyTorch wheels (compatible with vLLM 0.15.1)
-RUN python3 -m pip install --upgrade pip && \
-    python3 -m pip install "vllm[flashinfer]==0.17.1" --extra-index-url https://download.pytorch.org/whl/cu129
+# Optional sanity check during build
+RUN which nvcc && nvcc --version
 
+# Upgrade Python packaging tools first
+RUN python3 -m pip install --upgrade pip setuptools wheel
 
+# Install the exact CUDA 13.0 vLLM wheel
+# Verified wheel URL format from vLLM docs; this specific 0.17.1 cu130 wheel resolves.
+ARG VLLM_VERSION=0.17.1
+RUN python3 -m pip install --no-cache-dir \
+    "https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cu130-cp38-abi3-manylinux_2_35_x86_64.whl" \
+    --extra-index-url https://download.pytorch.org/whl/cu130
 
-# Install additional Python dependencies (after vLLM to avoid PyTorch version conflicts)
+# Install FlashInfer + optional prebuilt packages to reduce runtime compilation
+RUN python3 -m pip install --no-cache-dir \
+    flashinfer-python \
+    flashinfer-cubin && \
+    python3 -m pip install --no-cache-dir \
+    flashinfer-jit-cache \
+    --index-url https://flashinfer.ai/whl/cu130
+
+# Install your additional Python dependencies afterwards
 COPY builder/requirements.txt /requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --upgrade -r /requirements.txt
 
-# Setup for Option 2: Building the Image with the Model included
+# Setup for building the image with the model included
 ARG MODEL_NAME=""
 ARG TOKENIZER_NAME=""
 ARG BASE_PATH="/runpod-volume"
 ARG QUANTIZATION=""
 ARG MODEL_REVISION=""
 ARG TOKENIZER_REVISION=""
-ARG VLLM_NIGHTLY="false"
 
 ENV MODEL_NAME=$MODEL_NAME \
     MODEL_REVISION=$MODEL_REVISION \
@@ -35,30 +58,20 @@ ENV MODEL_NAME=$MODEL_NAME \
     HUGGINGFACE_HUB_CACHE="${BASE_PATH}/huggingface-cache/hub" \
     HF_HOME="${BASE_PATH}/huggingface-cache/hub" \
     HF_HUB_ENABLE_HF_TRANSFER=0 \
-    # Suppress Ray metrics agent warnings (not needed in containerized environments)
     RAY_METRICS_EXPORT_ENABLED=0 \
     RAY_DISABLE_USAGE_STATS=1 \
-    # Prevent rayon thread pool panic in containers where ulimit -u < nproc
-    # (tokenizers uses Rust's rayon which tries to spawn threads = CPU cores)
     TOKENIZERS_PARALLELISM=false \
-    RAYON_NUM_THREADS=4
-
-ENV PYTHONPATH="/:/vllm-workspace"
-
-RUN if [ "${VLLM_NIGHTLY}" = "true" ]; then \
-    pip install -U vllm --pre --index-url https://pypi.org/simple --extra-index-url https://wheels.vllm.ai/nightly && \
-    apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/* && \
-    pip install git+https://github.com/huggingface/transformers.git; \
-fi
+    RAYON_NUM_THREADS=4 \
+    PYTHONPATH="/:/vllm-workspace"
 
 COPY src /src
+
 RUN --mount=type=secret,id=HF_TOKEN,required=false \
     if [ -f /run/secrets/HF_TOKEN ]; then \
-    export HF_TOKEN=$(cat /run/secrets/HF_TOKEN); \
+      export HF_TOKEN=$(cat /run/secrets/HF_TOKEN); \
     fi && \
     if [ -n "$MODEL_NAME" ]; then \
-    python3 /src/download_model.py; \
+      python3 /src/download_model.py; \
     fi
 
-# Start the handler
 CMD ["python3", "/src/handler.py"]
