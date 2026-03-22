@@ -13,8 +13,6 @@ from vllm.entrypoints.openai.chat_completion.serving import OpenAIServingChat
 from vllm.entrypoints.openai.completion.protocol import CompletionRequest
 from vllm.entrypoints.openai.completion.serving import OpenAIServingCompletion
 from vllm.entrypoints.openai.engine.protocol import ErrorResponse
-from vllm.entrypoints.pooling.embed.serving import OpenAIServingEmbedding
-from vllm.entrypoints.pooling.embed.protocol import EmbeddingChatRequest, EmbeddingCompletionRequest
 from vllm.entrypoints.openai.models.protocol import BaseModelPath, LoRAModulePath
 from vllm.entrypoints.openai.models.serving import OpenAIServingModels
 
@@ -286,18 +284,6 @@ class OpenAIvLLMEngine(vLLMEngine):
             enable_force_include_usage=os.getenv('ENABLE_FORCE_INCLUDE_USAGE', 'false').lower() == 'true',
             log_error_stack=os.getenv('LOG_ERROR_STACK', 'false').lower() == 'true',
         )
-        if self.model_config.pooler_config is not None:
-            self.embedding_engine = OpenAIServingEmbedding(
-                engine_client=self.llm,
-                models=self.serving_models,
-                request_logger=None,
-                chat_template=chat_template,
-                chat_template_content_format="auto",
-                trust_request_chat_template=os.getenv('TRUST_REQUEST_CHAT_TEMPLATE', 'false').lower() == 'true',
-                log_error_stack=os.getenv('LOG_ERROR_STACK', 'false').lower() == 'true',
-            )
-        else:
-            self.embedding_engine = None
 
         if hasattr(self.chat_engine, 'warmup'):
             await self.chat_engine.warmup()
@@ -311,8 +297,6 @@ class OpenAIvLLMEngine(vLLMEngine):
         elif openai_request.openai_route in ["/v1/chat/completions", "/v1/completions"]:
             async for response in self._handle_chat_or_completion_request(openai_request):
                 yield response
-        elif openai_request.openai_route == "/v1/embeddings":
-            yield await self._handle_embedding_request(openai_request)
         else:
             yield create_error_response("Invalid route").model_dump()
     
@@ -320,25 +304,6 @@ class OpenAIvLLMEngine(vLLMEngine):
         models = await self.serving_models.show_available_models()
         return models.model_dump()
     
-    async def _handle_embedding_request(self, openai_request: JobInput):
-        if self.embedding_engine is None:
-            return create_error_response("This model does not support embeddings").model_dump()
-        try:
-            openai_input = openai_request.openai_input
-            # Determine request class: if "messages" key is present, it's a chat-style embedding
-            if "messages" in openai_input:
-                request = EmbeddingChatRequest(**openai_input)
-            else:
-                request = EmbeddingCompletionRequest(**openai_input)
-        except Exception as e:
-            return create_error_response(str(e)).model_dump()
-
-        dummy_request = DummyRequest()
-        response = await self.embedding_engine(request, raw_request=dummy_request)
-        if isinstance(response, ErrorResponse):
-            return response.model_dump()
-        return response.model_dump()
-
     async def _handle_chat_or_completion_request(self, openai_request: JobInput):
         if openai_request.openai_route == "/v1/chat/completions":
             request_class = ChatCompletionRequest
