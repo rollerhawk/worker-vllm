@@ -15,34 +15,48 @@ ENV PATH=${CUDA_HOME}/bin:${PATH}
 ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
 ENV VLLM_BLOCKSCALE_FP8_GEMM_FLASHINFER=0
 
-# Optional sanity check during build
 RUN which nvcc && nvcc --version
 
-# Upgrade Python packaging tools first
 RUN python3 -m pip install --upgrade pip setuptools wheel
 
-# Install the exact CUDA 13.0 vLLM wheel
+# Install vLLM — this pulls compatible torch + flashinfer-python automatically
 ARG VLLM_VERSION=0.18.0
-RUN python3 -m pip install --upgrade pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir \
+RUN python3 -m pip install --no-cache-dir \
     "https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cu130-cp38-abi3-manylinux_2_35_x86_64.whl" \
     --extra-index-url https://download.pytorch.org/whl/cu130
 
-# Remove any conflicting FlashInfer packages first
-RUN python3 -m pip uninstall -y flashinfer flashinfer-python flashinfer-cubin flashinfer-jit-cache || true
+# Pin torch and capture flashinfer version so nothing downstream can break them
+RUN python3 -c "\
+import torch, flashinfer; \
+open('/torch-constraint.txt','w').write(f'torch=={torch.__version__}\n'); \
+open('/flashinfer-version.txt','w').write(flashinfer.__version__)" && \
+    cat /torch-constraint.txt && \
+    echo "flashinfer-python=$(cat /flashinfer-version.txt)"
 
-# Install ONE matched FlashInfer set
-RUN python3 -m pip install --no-cache-dir \
-    flashinfer-python==0.6.4 \
-    flashinfer-cubin==0.6.4 && \
+# Install matching cubin + jit-cache for the flashinfer version vLLM chose
+RUN FI_VERSION=$(cat /flashinfer-version.txt) && \
     python3 -m pip install --no-cache-dir \
-    flashinfer-jit-cache==0.6.4 \
-    --index-url https://flashinfer.ai/whl/cu130
+    flashinfer-cubin==${FI_VERSION} \
+    -c /torch-constraint.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu130 && \
+    python3 -m pip install --no-cache-dir \
+    flashinfer-jit-cache==${FI_VERSION} \
+    --index-url https://flashinfer.ai/whl/cu130 \
+    -c /torch-constraint.txt
 
-# Install your additional Python dependencies afterwards
+# Install additional Python dependencies — constrained
 COPY builder/requirements.txt /requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install --upgrade -r /requirements.txt
+    python3 -m pip install --upgrade -r /requirements.txt \
+    -c /torch-constraint.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu130
+
+# Verify everything is consistent
+RUN python3 -c "\
+import torch, vllm, flashinfer; \
+print(f'torch {torch.__version__} cuda {torch.version.cuda}'); \
+print(f'vllm {vllm.__version__}'); \
+print(f'flashinfer {flashinfer.__version__}')"
 
 # Setup for building the image with the model included
 ARG MODEL_NAME=""
