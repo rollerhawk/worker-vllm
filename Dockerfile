@@ -22,7 +22,7 @@ RUN which nvcc && nvcc --version
 RUN python3 -m pip install --upgrade pip setuptools wheel
 
 # Install the exact CUDA 13.0 vLLM wheel
-ARG VLLM_VERSION=0.17.1
+ARG VLLM_VERSION=0.18.0
 RUN python3 -m pip install --upgrade pip setuptools wheel && \
     python3 -m pip install --no-cache-dir \
     "https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cu130-cp38-abi3-manylinux_2_35_x86_64.whl" \
